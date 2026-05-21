@@ -5,14 +5,14 @@ const cors = require("cors");
 
 const app = express();
 
-// DB (giữ nếu bạn cần)
 require("./db");
 
 const authRoutes = require("./routes/auth");
 const studentRoutes = require("./routes/students");
 const gradeRoutes = require("./routes/grades");
+const semesterRoutes = require("./routes/semesters");
+const courseRoutes = require("./routes/courses");
 
-// Middleware
 app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
@@ -20,14 +20,12 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// =======================
-// ROUTES (ĐÃ FIX GỌN LẠI)
-// =======================
 app.use("/api/auth", authRoutes);
 app.use("/api/students", studentRoutes);
 app.use("/api/grades", gradeRoutes);
+app.use("/api/semesters", semesterRoutes);
+app.use("/api/courses", courseRoutes);
 
-// Test server
 app.get("/", (req, res) => {
     res.send("Backend running OK");
 });
