@@ -3,14 +3,13 @@ const router = express.Router();
 
 const db = require("../db");
 const { verifyToken } = require("../controllers/middleware/auth");
+const { sendNotification } = require("../notification");
 
 // GET
 router.get("/", verifyToken, (req, res) => {
     const user = req.user;
-    const studentId = req.query.studentId || user.student_id;
 
     if (user.role === "student") {
-        // Student chỉ được xem điểm của chính mình
         return db.query(
             "SELECT * FROM scores WHERE student_id = ?",
             [user.student_id],
@@ -21,22 +20,25 @@ router.get("/", verifyToken, (req, res) => {
         );
     }
 
-    // Admin/teacher lọc theo studentId query param
+    const studentId = req.query.studentId;
+    const semesterId = req.query.semesterId;
+
+    let query = "SELECT * FROM scores WHERE 1=1";
+    const params = [];
+
     if (studentId) {
-        db.query(
-            "SELECT * FROM scores WHERE student_id = ?",
-            [studentId],
-            (err, result) => {
-                if (err) return res.status(500).json(err);
-                res.json(result);
-            }
-        );
-    } else {
-        db.query("SELECT * FROM scores", (err, result) => {
-            if (err) return res.status(500).json(err);
-            res.json(result);
-        });
+        query += " AND student_id = ?";
+        params.push(studentId);
     }
+    if (semesterId) {
+        query += " AND semester_id = ?";
+        params.push(semesterId);
+    }
+
+    db.query(query, params, (err, result) => {
+        if (err) return res.status(500).json(err);
+        res.json(result);
+    });
 });
 
 // POST - Thêm điểm mới
@@ -51,6 +53,22 @@ router.post("/", verifyToken, (req, res) => {
 
     db.query("INSERT INTO scores SET ?", data, (err, result) => {
         if (err) return res.status(500).json(err);
+
+        // Gửi notification cho student
+        db.query(
+            "SELECT u.fcm_token, s.full_name FROM users u JOIN students s ON u.student_id = s.id WHERE u.student_id = ?",
+            [data.student_id],
+            (err2, rows) => {
+                if (!err2 && rows.length > 0 && rows[0].fcm_token) {
+                    sendNotification(
+                        rows[0].fcm_token,
+                        "Điểm mới",
+                        `Môn ${data.subject_name} đã được nhập điểm`
+                    );
+                }
+            }
+        );
+
         res.json({ message: "Thêm điểm thành công", id: result.insertId });
     });
 });
@@ -69,6 +87,22 @@ router.put("/:id", verifyToken, (req, res) => {
     db.query("UPDATE scores SET ? WHERE id = ?", [data, id], (err, result) => {
         if (err) return res.status(500).json(err);
         if (result.affectedRows === 0) return res.status(404).json("Không tìm thấy điểm");
+
+        // Gửi notification cho student
+        db.query(
+            "SELECT u.fcm_token FROM users u WHERE u.student_id = ?",
+            [data.student_id],
+            (err2, rows) => {
+                if (!err2 && rows.length > 0 && rows[0].fcm_token) {
+                    sendNotification(
+                        rows[0].fcm_token,
+                        "Điểm đã cập nhật",
+                        `Môn ${data.subject_name} đã được cập nhật điểm`
+                    );
+                }
+            }
+        );
+
         res.json({ message: "Cập nhật điểm thành công" });
     });
 });
