@@ -3,7 +3,12 @@ const router = express.Router();
 
 const db = require("../db");
 const { verifyToken } = require("../controllers/middleware/auth");
-const { sendNotification } = require("../notification");
+let sendNotification = () => {};
+try {
+    ({ sendNotification } = require("../notification"));
+} catch (err) {
+    sendNotification = () => {};
+}
 
 // GET
 router.get("/", verifyToken, (req, res) => {
