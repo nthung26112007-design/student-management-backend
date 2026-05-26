@@ -8,6 +8,7 @@ const bcrypt = require("bcrypt");
 // GET
 router.get("/", verifyToken, (req, res) => {
     const user = req.user;
+    const { className } = req.query;
 
     if (user.role === "student") {
         db.query(
@@ -19,7 +20,15 @@ router.get("/", verifyToken, (req, res) => {
             }
         );
     } else {
-        db.query("SELECT * FROM students", (err, result) => {
+        let query = "SELECT * FROM students WHERE 1=1";
+        const params = [];
+
+        if (className) {
+            query += " AND LOWER(TRIM(class_name)) = LOWER(TRIM(?))";
+            params.push(className);
+        }
+
+        db.query(query, params, (err, result) => {
             if (err) return res.status(500).json(err);
             res.json(result);
         });
