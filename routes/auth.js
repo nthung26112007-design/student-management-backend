@@ -10,7 +10,7 @@ router.post("/login", (req, res) => {
     const { username, password } = req.body;
 
     db.query(
-        `SELECT u.*, s.full_name, s.student_code, s.class_name, s.gender, s.birth_date, s.email, s.phone, s.address, s.major, s.faculty, s.training_level, s.status
+        `SELECT u.*, s.full_name, s.student_code, s.class_name, s.gender, s.birth_date, s.email, s.phone, s.academic_status
          FROM users u
          LEFT JOIN students s ON u.student_id = s.id
          WHERE u.username = ?`,
