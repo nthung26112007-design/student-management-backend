@@ -38,6 +38,10 @@ app.get("/", (req, res) => {
     res.send("Backend running OK");
 });
 
+app.get("/api/fees/health", (req, res) => {
+    res.json({ message: "fees route is mounted" });
+});
+
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {

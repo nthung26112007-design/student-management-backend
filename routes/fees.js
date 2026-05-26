@@ -12,6 +12,10 @@ const resolveStudentId = (req, requestedStudentId) => {
   return requestedStudentId || null;
 };
 
+router.get('/health', (req, res) => {
+  res.json({ message: 'fees route is running' });
+});
+
 router.get('/invoices', verifyToken, (req, res) => {
   const studentId = resolveStudentId(req, req.query.studentId);
   let query = `
