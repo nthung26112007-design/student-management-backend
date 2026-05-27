@@ -7,7 +7,7 @@ router.get('/me', verifyToken, (req, res) => {
   db.query(
     `SELECT u.id, u.username, u.role, u.student_id,
             s.full_name, s.student_code, s.class_name, s.gender, s.birth_date,
-            s.email, s.phone, s.address, s.major, s.faculty, s.training_level, s.status,
+            s.email, s.phone, s.academic_status AS status,
             u.avatar_url
      FROM users u
      LEFT JOIN students s ON u.student_id = s.id
