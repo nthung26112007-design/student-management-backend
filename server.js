@@ -14,6 +14,7 @@ const semesterRoutes = require("./routes/semesters");
 const courseRoutes = require("./routes/courses");
 const attendanceRoutes = require("./routes/attendance");
 const feeRoutes = require("./routes/fees");
+const scheduleRoutes = require("./routes/schedules");
 const profileRoutes = require("./routes/profile");
 const diagnosticsRoutes = require("./routes/diagnostics");
 
@@ -31,6 +32,7 @@ app.use("/api/semesters", semesterRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/fees", feeRoutes);
+app.use("/api/schedules", scheduleRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/diagnostics", diagnosticsRoutes);
 
