@@ -34,4 +34,50 @@ router.get('/courses-class-mismatch', verifyToken, verifyAdmin, (req, res) => {
   });
 });
 
+// Debug endpoint to check table structure
+router.get('/debug-tables', verifyToken, (req, res) => {
+  const results = {};
+  const tables = ['tuition_invoices', 'tuition_payments', 'students'];
+  
+  let completed = 0;
+  tables.forEach(table => {
+    db.query(`DESCRIBE ${table}`, (err, rows) => {
+      if (err) {
+        results[table] = { error: err.message };
+      } else {
+        results[table] = rows;
+      }
+      completed++;
+      if (completed === tables.length) {
+        res.json(results);
+      }
+    });
+  });
+});
+
+// Test invoice query
+router.get('/test-invoice-query', verifyToken, (req, res) => {
+  const { student_id } = req.query;
+  let query = `
+    SELECT i.id, i.student_id, i.amount, i.status, i.due_date, i.note, i.invoice_code, i.title, i.class_name, i.created_at, i.updated_at,
+      s.full_name, s.student_code, s.class_name AS student_class_name
+    FROM tuition_invoices i
+    LEFT JOIN students s ON s.id = i.student_id
+    WHERE 1=1
+  `;
+  const params = [];
+  
+  if (student_id) {
+    query += ' AND i.student_id = ?';
+    params.push(student_id);
+  }
+  
+  query += ' ORDER BY i.due_date DESC, i.id DESC LIMIT 10';
+  
+  db.query(query, params, (err, result) => {
+    if (err) return res.status(500).json({ message: 'Query error', error: err.message, sql: query });
+    res.json(result);
+  });
+});
+
 module.exports = router;
