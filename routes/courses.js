@@ -10,7 +10,7 @@ router.get("/", verifyToken, (req, res) => {
 
     const buildAndReturnCourses = (resolvedClassName = null) => {
         let query = `
-            SELECT c.id, c.name, c.credits, c.status, c.class_name, c.semester_id, c.teacher_id, c.created_at, c.updated_at,
+            SELECT c.id, c.subject_name as name, c.code, c.class_name, c.semester_id, c.teacher_id,
                    s.name as semester_name, u.username as teacher_name
             FROM courses c
             LEFT JOIN semesters s ON c.semester_id = s.id
@@ -88,11 +88,10 @@ router.post("/", verifyToken, verifyAdmin, (req, res) => {
 
         const row = {
             semester_id: data.semester_id,
-            name: subjectName || null,
-            credits: data.credits,
-            status: data.status,
+            subject_name: subjectName || null,
+            code: subjectCode || null,
         };
-        if (subjectCode) row.code = subjectCode;
+        if (data.teacher_id) row.teacher_id = data.teacher_id;
         if (data.class_name) row.class_name = data.class_name;
 
         db.query("INSERT INTO courses SET ?", row, (err, result) => {
@@ -112,9 +111,8 @@ router.put("/:id", verifyToken, verifyAdmin, (req, res) => {
 
     const row = {};
     if (data.subject_code || data.code) row.code = data.subject_code || data.code;
-    if (data.subject_name || data.name) row.name = data.subject_name || data.name;
-    if (data.credits != null) row.credits = data.credits;
-    if (data.status) row.status = data.status;
+    if (data.subject_name || data.name) row.subject_name = data.subject_name || data.name;
+    if (data.teacher_id) row.teacher_id = data.teacher_id;
     if (data.class_name) row.class_name = data.class_name;
 
     if (Object.keys(row).length === 0) {
