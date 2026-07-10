@@ -38,6 +38,7 @@ router.post("/", verifyToken, verifyAdmin, (req, res) => {
     };
     if (data.status) row.status = data.status;
     if (data.description) row.description = data.description;
+    if (data.class_name) row.class_name = data.class_name;
 
     db.query("INSERT INTO semesters SET ?", row, (err, result) => {
         if (err) {
