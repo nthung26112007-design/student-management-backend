@@ -5,6 +5,20 @@ const cors = require("cors");
 
 const app = express();
 
+// ===== CORS - put at the very top, before everything =====
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin, Accept, X-Requested-With');
+    res.setHeader('Access-Control-Allow-Credentials', 'false');
+    res.setHeader('Access-Control-Max-Age', '86400');
+
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(204);
+    }
+    next();
+});
+
 require("./db");
 
 const authRoutes = require("./routes/auth");
@@ -20,24 +34,11 @@ const diagnosticsRoutes = require("./routes/diagnostics");
 
 app.use(cors({
     origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Requested-With'],
-    exposedHeaders: ['Authorization'],
     credentials: false,
-    preflightContinue: false,
     optionsSuccessStatus: 204
 }));
-
-app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Vary', 'Origin');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin, Accept, X-Requested-With');
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(204);
-    }
-    next();
-});
 
 app.use(express.json());
 
