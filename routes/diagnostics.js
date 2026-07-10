@@ -7,7 +7,7 @@ router.get('/courses-class-mismatch', verifyToken, verifyAdmin, (req, res) => {
   const { semester_id } = req.query;
 
   let query = `
-    SELECT c.id, c.subject_name, c.class_name, c.semester_id, s.name AS semester_name
+    SELECT c.id, c.name AS subject_name, c.class_name, c.semester_id, s.name AS semester_name
     FROM courses c
     LEFT JOIN semesters s ON s.id = c.semester_id
     WHERE 1=1

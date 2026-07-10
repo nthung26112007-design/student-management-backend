@@ -20,9 +20,21 @@ const diagnosticsRoutes = require("./routes/diagnostics");
 
 app.use(cors({
     origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Requested-With'],
+    exposedHeaders: ['Authorization'],
+    credentials: false,
+    preflightContinue: false,
+    optionsSuccessStatus: 204
 }));
+
+app.use((req, res, next) => {
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(204);
+    }
+    next();
+});
+
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);

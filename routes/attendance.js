@@ -9,11 +9,10 @@ const isStaff = (user) => user.role === 'admin' || user.role === 'teacher';
 router.get('/sessions', verifyToken, (req, res) => {
   const { className, courseId } = req.query;
 
-  const loadSessions = (resolvedClassName = null) => {
+  const run = (finalClassName) => {
     let query = 'SELECT * FROM attendance_sessions WHERE 1=1';
     const params = [];
 
-    const finalClassName = className || resolvedClassName;
     if (finalClassName) {
       query += ' AND class_name = ?';
       params.push(finalClassName);
@@ -25,29 +24,56 @@ router.get('/sessions', verifyToken, (req, res) => {
 
     query += ' ORDER BY session_date DESC, id DESC';
     db.query(query, params, (err, result) => {
-      if (err) return res.status(500).json(err);
+      if (err) {
+        console.error('GET /attendance/sessions query error:', err);
+        return res.status(500).json(err);
+      }
       res.json(result);
     });
   };
 
   if (req.user.role === 'student' && !className) {
-    return db.query(
+    db.query(
       'SELECT class_name FROM students WHERE id = ?',
       [req.user.student_id],
       (err, rows) => {
-        if (err) return res.status(500).json(err);
-        loadSessions(rows?.[0]?.class_name);
+        if (err) {
+          console.error('GET /attendance/sessions student lookup error:', err);
+          return res.status(500).json(err);
+        }
+        run(rows?.[0]?.class_name || null);
       }
     );
+    return;
   }
 
-  loadSessions();
+  run(className || null);
+});
+
+router.get('/sessions/:id', verifyToken, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json('Invalid session id');
+  }
+
+  db.query('SELECT * FROM attendance_sessions WHERE id = ? LIMIT 1', [id], (err, result) => {
+    if (err) {
+      console.error('GET /attendance/sessions/:id query error:', err);
+      return res.status(500).json(err);
+    }
+    const item = result?.[0];
+    if (!item) return res.status(404).json('Not found');
+    res.json(item);
+  });
 });
 
 router.post('/sessions', verifyToken, (req, res) => {
   if (!isStaff(req.user)) return res.status(403).json('Forbidden');
   db.query('INSERT INTO attendance_sessions SET ?', req.body, (err, result) => {
-    if (err) return res.status(500).json(err);
+    if (err) {
+      console.error('POST /attendance/sessions INSERT error:', err);
+      return res.status(500).json({ error: 'INSERT_SESSION_FAILED', message: err.message });
+    }
     res.json({ message: 'Tạo buổi điểm danh thành công', id: result.insertId });
   });
 });
@@ -106,6 +132,23 @@ router.get('/records', verifyToken, (req, res) => {
   loadRecords();
 });
 
+router.get('/records/:id', verifyToken, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json('Invalid record id');
+  }
+
+  db.query('SELECT * FROM attendance_records WHERE id = ? LIMIT 1', [id], (err, result) => {
+    if (err) {
+      console.error('GET /attendance/records/:id query error:', err);
+      return res.status(500).json(err);
+    }
+    const item = result?.[0];
+    if (!item) return res.status(404).json('Not found');
+    res.json(item);
+  });
+});
+
 router.post('/records/bulk', verifyToken, (req, res) => {
   if (!isStaff(req.user)) return res.status(403).json('Forbidden');
   const { sessionId, records } = req.body;
@@ -122,7 +165,10 @@ router.post('/records/bulk', verifyToken, (req, res) => {
     'INSERT INTO attendance_records (session_id, student_id, status, note) VALUES ?',
     [values],
     (err, result) => {
-      if (err) return res.status(500).json(err);
+      if (err) {
+        console.error('POST /attendance/records/bulk INSERT error:', err);
+        return res.status(500).json({ error: 'INSERT_RECORDS_FAILED', message: err.message });
+      }
       res.json({ message: 'Lưu điểm danh thành công', affectedRows: result.affectedRows });
     }
   );
@@ -140,7 +186,7 @@ router.put('/records/:id', verifyToken, (req, res) => {
 router.get('/summary', verifyToken, (req, res) => {
   const { studentId, className, courseId } = req.query;
 
-  const loadSummary = (studentIds = null) => {
+  const buildBaseQuery = () => {
     let query = `
       SELECT
         s.id AS student_id,
@@ -148,10 +194,10 @@ router.get('/summary', verifyToken, (req, res) => {
         s.student_code,
         s.class_name,
         COUNT(ar.id) AS total_sessions,
-        SUM(CASE WHEN ar.status = 'present' THEN 1 ELSE 0 END) AS present_count,
-        SUM(CASE WHEN ar.status = 'absent' THEN 1 ELSE 0 END) AS absent_count,
-        SUM(CASE WHEN ar.status = 'late' THEN 1 ELSE 0 END) AS late_count,
-        SUM(CASE WHEN ar.status = 'excused' THEN 1 ELSE 0 END) AS excused_count
+        COALESCE(SUM(CASE WHEN ar.status = 'present' THEN 1 ELSE 0 END), 0) AS present_count,
+        COALESCE(SUM(CASE WHEN ar.status = 'absent' THEN 1 ELSE 0 END), 0) AS absent_count,
+        COALESCE(SUM(CASE WHEN ar.status = 'late' THEN 1 ELSE 0 END), 0) AS late_count,
+        COALESCE(SUM(CASE WHEN ar.status = 'excused' THEN 1 ELSE 0 END), 0) AS excused_count
       FROM students s
       LEFT JOIN attendance_records ar ON ar.student_id = s.id
       LEFT JOIN attendance_sessions ats ON ats.id = ar.session_id
@@ -159,13 +205,7 @@ router.get('/summary', verifyToken, (req, res) => {
     `;
     const params = [];
 
-    if (Array.isArray(studentIds) && studentIds.length > 0) {
-      query += ` AND s.id IN (${studentIds.map(() => '?').join(',')})`;
-      params.push(...studentIds);
-    } else if (studentIds) {
-      query += ' AND s.id = ?';
-      params.push(studentIds);
-    } else if (studentId) {
+    if (studentId) {
       query += ' AND s.id = ?';
       params.push(studentId);
     }
@@ -174,40 +214,42 @@ router.get('/summary', verifyToken, (req, res) => {
       params.push(className);
     }
     if (courseId) {
-      query += ' AND ats.course_id = ?';
+      query += ' AND EXISTS (SELECT 1 FROM attendance_records ar2 INNER JOIN attendance_sessions ats2 ON ats2.id = ar2.session_id WHERE ar2.student_id = s.id AND ats2.course_id = ?)' ;
       params.push(courseId);
     }
 
-    query += ' GROUP BY s.id ORDER BY s.full_name';
+    query += ' GROUP BY s.id, s.full_name, s.student_code, s.class_name ORDER BY s.full_name';
+    return { query, params };
+  };
 
+  const runSummary = () => {
+    const { query, params } = buildBaseQuery();
     db.query(query, params, (err, result) => {
-      if (err) return res.status(500).json(err);
+      if (err) {
+        console.error('GET /attendance/summary query error:', err);
+        return res.status(500).json(err);
+      }
       res.json(result);
     });
   };
 
   if (req.user.role === 'student' && !studentId) {
-    return db.query(
-      'SELECT class_name FROM students WHERE id = ?',
-      [req.user.student_id],
-      (err, rows) => {
-        if (err) return res.status(500).json(err);
-        const classNameFromDb = rows?.[0]?.class_name;
-        if (!classNameFromDb) return loadSummary(req.user.student_id);
-        db.query(
-          'SELECT id FROM students WHERE class_name = ?',
-          [classNameFromDb],
-          (err2, studentRows) => {
-            if (err2) return res.status(500).json(err2);
-            const studentIds = studentRows.map((s) => s.id);
-            loadSummary(studentIds.length ? studentIds : req.user.student_id);
-          }
-        );
+    return db.query('SELECT class_name FROM students WHERE id = ?', [req.user.student_id], (err, rows) => {
+      if (err) {
+        console.error('GET /attendance/summary student lookup error:', err);
+        return res.status(500).json(err);
       }
-    );
+      const classNameFromDb = rows?.[0]?.class_name;
+      if (classNameFromDb && !className) {
+        req.query.className = classNameFromDb;
+      } else if (!classNameFromDb) {
+        req.query.studentId = req.user.student_id;
+      }
+      runSummary();
+    });
   }
 
-  loadSummary();
+  runSummary();
 });
 
 module.exports = router;

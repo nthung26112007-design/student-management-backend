@@ -19,12 +19,30 @@ router.get('/health', (req, res) => {
 router.get('/invoices', verifyToken, (req, res) => {
   const studentId = resolveStudentId(req, req.query.studentId);
   let query = `
-    SELECT i.*, s.full_name, s.student_code, s.class_name,
-      COALESCE(SUM(p.amount), 0) AS paid_amount,
-      GREATEST(i.amount - COALESCE(SUM(p.amount), 0), 0) AS remaining_amount
+    SELECT
+      i.id,
+      i.student_id,
+      i.amount,
+      i.status,
+      i.due_date,
+      i.note,
+      i.invoice_code,
+      i.title,
+      i.class_name,
+      i.created_at,
+      i.updated_at,
+      s.full_name,
+      s.student_code,
+      s.class_name AS student_class_name,
+      COALESCE(p.paid_amount, 0) AS paid_amount,
+      GREATEST(i.amount - COALESCE(p.paid_amount, 0), 0) AS remaining_amount
     FROM tuition_invoices i
     LEFT JOIN students s ON s.id = i.student_id
-    LEFT JOIN tuition_payments p ON p.invoice_id = i.id
+    LEFT JOIN (
+      SELECT invoice_id, SUM(amount) AS paid_amount
+      FROM tuition_payments
+      GROUP BY invoice_id
+    ) p ON p.invoice_id = i.id
     WHERE 1=1
   `;
   const params = [];
@@ -34,9 +52,9 @@ router.get('/invoices', verifyToken, (req, res) => {
     params.push(studentId);
   }
 
-  query += ' GROUP BY i.id ORDER BY i.due_date DESC, i.id DESC';
+  query += ' ORDER BY i.due_date DESC, i.id DESC';
   db.query(query, params, (err, result) => {
-    if (err) return res.status(500).json(err);
+    if (err) return res.status(500).json({ message: 'Không tải được hóa đơn', error: err.message });
     res.json(result);
   });
 });
@@ -62,9 +80,55 @@ router.post('/invoices', verifyToken, (req, res) => {
 router.put('/invoices/:id', verifyToken, (req, res) => {
   if (!isStaff(req.user)) return res.status(403).json('Forbidden');
   const { id } = req.params;
-  db.query('UPDATE tuition_invoices SET ? WHERE id = ?', [req.body, id], (err, result) => {
-    if (err) return res.status(500).json(err);
+  const {
+    student_id,
+    amount,
+    status,
+    due_date,
+    note,
+    invoice_code,
+    title,
+    class_name,
+  } = req.body;
+
+  const fields = [];
+  const values = [];
+
+  if (student_id !== undefined) { fields.push('student_id = ?'); values.push(student_id); }
+  if (amount !== undefined) { fields.push('amount = ?'); values.push(amount); }
+  if (status !== undefined) { fields.push('status = ?'); values.push(status); }
+  if (due_date !== undefined) { fields.push('due_date = ?'); values.push(due_date); }
+  if (note !== undefined) { fields.push('note = ?'); values.push(note); }
+  if (invoice_code !== undefined) { fields.push('invoice_code = ?'); values.push(invoice_code); }
+  if (title !== undefined) { fields.push('title = ?'); values.push(title); }
+  if (class_name !== undefined) { fields.push('class_name = ?'); values.push(class_name); }
+
+  if (!fields.length) {
+    return res.status(400).json({ message: 'Không có dữ liệu cập nhật' });
+  }
+
+  const sql = `UPDATE tuition_invoices SET ${fields.join(', ')} WHERE id = ?`;
+  values.push(id);
+
+  db.query(sql, values, (err, result) => {
+    if (err) return res.status(500).json({ message: 'Không cập nhật được hóa đơn', error: err.message });
     res.json({ message: 'Cập nhật hóa đơn thành công', affectedRows: result.affectedRows });
+  });
+});
+
+router.delete('/invoices/:id', verifyToken, (req, res) => {
+  if (!isStaff(req.user)) return res.status(403).json('Forbidden');
+  const { id } = req.params;
+
+  db.query('DELETE FROM tuition_payments WHERE invoice_id = ?', [id], (paymentErr) => {
+    if (paymentErr) {
+      return res.status(500).json({ message: 'Không xóa được thanh toán liên quan', error: paymentErr.message });
+    }
+
+    db.query('DELETE FROM tuition_invoices WHERE id = ?', [id], (err, result) => {
+      if (err) return res.status(500).json({ message: 'Không xóa được hóa đơn', error: err.message });
+      res.json({ message: 'Xóa hóa đơn thành công', affectedRows: result.affectedRows });
+    });
   });
 });
 

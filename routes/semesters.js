@@ -5,7 +5,15 @@ const { verifyToken, verifyAdmin } = require("../controllers/middleware/auth");
 
 // GET tất cả kỳ học
 router.get("/", verifyToken, (req, res) => {
-    db.query("SELECT * FROM semesters ORDER BY start_date DESC", (err, result) => {
+    const { class_name } = req.query;
+    let query = "SELECT * FROM semesters";
+    const params = [];
+    if (class_name) {
+        query += " WHERE class_name = ?";
+        params.push(class_name);
+    }
+    query += " ORDER BY start_date DESC";
+    db.query(query, params, (err, result) => {
         if (err) return res.status(500).json(err);
         res.json(result);
     });
@@ -14,8 +22,17 @@ router.get("/", verifyToken, (req, res) => {
 // POST tạo kỳ học mới
 router.post("/", verifyToken, verifyAdmin, (req, res) => {
     const data = req.body;
+    console.log('[POST /semesters] Payload:', JSON.stringify(data));
+
+    if (!data.name || !data.start_date || !data.end_date) {
+        return res.status(400).json({ message: "Thiếu thông tin bắt buộc: name, start_date, end_date" });
+    }
+
     db.query("INSERT INTO semesters SET ?", data, (err, result) => {
-        if (err) return res.status(500).json(err);
+        if (err) {
+            console.error('[POST /semesters] INSERT error:', err);
+            return res.status(500).json({ message: "Lỗi INSERT", detail: err.message });
+        }
         res.json({ message: "Tạo kỳ học thành công", id: result.insertId });
     });
 });

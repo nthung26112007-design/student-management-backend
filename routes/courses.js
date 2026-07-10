@@ -56,20 +56,64 @@ router.get("/", verifyToken, (req, res) => {
 // POST tạo môn học mới
 router.post("/", verifyToken, verifyAdmin, (req, res) => {
     const data = req.body;
-    db.query("INSERT INTO courses SET ?", data, (err, result) => {
-        if (err) return res.status(500).json(err);
-        res.json({ message: "Tạo môn học thành công", id: result.insertId });
+    console.log('[POST /courses] Payload:', JSON.stringify(data));
+
+    if (!data.semester_id) {
+        return res.status(400).json({ message: "Thiếu semester_id" });
+    }
+    const subjectCode = (data.subject_code || data.code || '').toString().trim();
+    const subjectName = (data.subject_name || data.name || '').toString().trim();
+    if (!subjectCode && !subjectName) {
+        return res.status(400).json({ message: "Thiếu thông tin môn học" });
+    }
+
+    db.query("SELECT id FROM semesters WHERE id = ?", [data.semester_id], (err, semesterRows) => {
+        if (err) {
+            console.error('[POST /courses] Semester check error:', err);
+            return res.status(500).json({ message: "Lỗi kiểm tra học kỳ", detail: err.message });
+        }
+        if (semesterRows.length === 0) {
+            return res.status(400).json({ message: "Học kỳ không tồn tại. Vui lòng tải lại trang và thử lại." });
+        }
+
+        const row = {
+            semester_id: data.semester_id,
+            code: subjectCode || null,
+            name: subjectName || null,
+            credits: data.credits,
+            status: data.status,
+        };
+        if (data.class_name) row.class_name = data.class_name;
+
+        db.query("INSERT INTO courses SET ?", row, (err, result) => {
+            if (err) {
+                console.error('[POST /courses] INSERT error:', err);
+                return res.status(500).json({ message: "Lỗi INSERT", detail: err.message });
+            }
+            console.log('[POST /courses] Inserted id:', result.insertId);
+            res.json({ message: "Tạo môn học thành công", id: result.insertId });
+        });
     });
 });
 
-// PUT cập nhật môn học
 router.put("/:id", verifyToken, verifyAdmin, (req, res) => {
     const { id } = req.params;
     const data = req.body;
-    db.query("UPDATE courses SET ? WHERE id = ?", [data, id], (err, result) => {
-        if (err) return res.status(500).json(err);
-        if (result.affectedRows === 0) return res.status(404).json("Không tìm thấy môn học");
-        res.json("Cập nhật môn học thành công");
+
+    const row = {};
+    if (data.subject_code || data.code) row.code = data.subject_code || data.code;
+    if (data.subject_name || data.name) row.name = data.subject_name || data.name;
+    if (data.credits != null) row.credits = data.credits;
+    if (data.status) row.status = data.status;
+    if (data.class_name) row.class_name = data.class_name;
+
+    db.query("UPDATE courses SET ? WHERE id = ?", [row, id], (err, result) => {
+        if (err) {
+            console.error('[PUT /courses] UPDATE error:', err);
+            return res.status(500).json({ message: "Lỗi UPDATE", detail: err.message });
+        }
+        if (result.affectedRows === 0) return res.status(404).json({ message: "Không tìm thấy môn học" });
+        res.json({ message: "Cập nhật môn học thành công" });
     });
 });
 
