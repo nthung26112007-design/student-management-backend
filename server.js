@@ -5,9 +5,31 @@ const cors = require("cors");
 
 const app = express();
 
-// ===== CORS - put at the very top, before everything =====
+// ===== CORS middleware - must be at the very top =====
+const allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:5000',
+    'http://localhost:51493',
+    'http://localhost:64493',
+    'http://localhost:51284',
+    'http://localhost',
+    'https://hungntmb.id.vn',
+    'https://www.hungntmb.id.vn',
+    '*'
+];
+
 app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    const origin = req.headers.origin;
+    
+    // Allow if origin is in allowed list or if it's a localhost origin
+    if (origin && (allowedOrigins.includes(origin) || origin.startsWith('http://localhost'))) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    
+    res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin, Accept, X-Requested-With');
     res.setHeader('Access-Control-Allow-Credentials', 'false');
@@ -31,14 +53,6 @@ const feeRoutes = require("./routes/fees");
 const scheduleRoutes = require("./routes/schedules");
 const profileRoutes = require("./routes/profile");
 const diagnosticsRoutes = require("./routes/diagnostics");
-
-app.use(cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Requested-With'],
-    credentials: false,
-    optionsSuccessStatus: 204
-}));
 
 app.use(express.json());
 
