@@ -10,7 +10,7 @@ router.get("/", verifyToken, (req, res) => {
 
     const buildAndReturnCourses = (resolvedClassName = null) => {
         let query = `
-            SELECT c.id, c.subject_name as name, c.code, c.class_name, c.semester_id, c.teacher_id,
+            SELECT c.id, c.subject_name as name, c.code, c.class_name, c.semester_id, c.teacher_id, c.credits, c.status,
                    s.name as semester_name, u.username as teacher_name
             FROM courses c
             LEFT JOIN semesters s ON c.semester_id = s.id
@@ -93,6 +93,8 @@ router.post("/", verifyToken, verifyAdmin, (req, res) => {
         };
         if (data.teacher_id) row.teacher_id = data.teacher_id;
         if (data.class_name) row.class_name = data.class_name;
+        if (data.credits != null) row.credits = data.credits;
+        if (data.status) row.status = data.status;
 
         db.query("INSERT INTO courses SET ?", row, (err, result) => {
             if (err) {
@@ -114,6 +116,8 @@ router.put("/:id", verifyToken, verifyAdmin, (req, res) => {
     if (data.subject_name || data.name) row.subject_name = data.subject_name || data.name;
     if (data.teacher_id) row.teacher_id = data.teacher_id;
     if (data.class_name) row.class_name = data.class_name;
+    if (data.credits != null) row.credits = data.credits;
+    if (data.status) row.status = data.status;
 
     if (Object.keys(row).length === 0) {
         return res.status(400).json({ message: "Không có dữ liệu cập nhật" });
