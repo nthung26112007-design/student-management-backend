@@ -32,8 +32,13 @@ router.get("/", verifyToken, (req, res) => {
 
         query += " ORDER BY c.id DESC";
 
+        console.log('[GET /courses] Query:', query, 'Params:', params);
+
         db.query(query, params, (err, result) => {
-            if (err) return res.status(500).json(err);
+            if (err) {
+                console.error('[GET /courses] Query error:', err);
+                return res.status(500).json({ message: "Lỗi truy vấn", error: err.message, code: err.code });
+            }
             res.json(result);
         });
     };
@@ -44,8 +49,12 @@ router.get("/", verifyToken, (req, res) => {
             "SELECT class_name FROM students WHERE id = ?",
             [user.student_id],
             (err, rows) => {
-                if (err) return res.status(500).json(err);
+                if (err) {
+                    console.error('[GET /courses] Student lookup error:', err);
+                    return res.status(500).json({ message: "Lỗi truy vấn", error: err.message, code: err.code });
+                }
                 const studentClassName = rows?.[0]?.class_name;
+                console.log('[GET /courses] Student class_name:', studentClassName);
                 buildAndReturnCourses(studentClassName);
             }
         );
