@@ -14,7 +14,10 @@ router.get("/", verifyToken, (req, res) => {
     }
     query += " ORDER BY start_date DESC";
     db.query(query, params, (err, result) => {
-        if (err) return res.status(500).json(err);
+        if (err) {
+            console.error('[GET /semesters] Query error:', err);
+            return res.status(500).json({ message: "Lỗi truy vấn", error: err.message, code: err.code });
+        }
         res.json(result);
     });
 });
@@ -28,10 +31,18 @@ router.post("/", verifyToken, verifyAdmin, (req, res) => {
         return res.status(400).json({ message: "Thiếu thông tin bắt buộc: name, start_date, end_date" });
     }
 
-    db.query("INSERT INTO semesters SET ?", data, (err, result) => {
+    const row = {
+        name: data.name,
+        start_date: data.start_date,
+        end_date: data.end_date,
+    };
+    if (data.status) row.status = data.status;
+    if (data.description) row.description = data.description;
+
+    db.query("INSERT INTO semesters SET ?", row, (err, result) => {
         if (err) {
             console.error('[POST /semesters] INSERT error:', err);
-            return res.status(500).json({ message: "Lỗi INSERT", detail: err.message });
+            return res.status(500).json({ message: "Lỗi INSERT", detail: err.message, code: err.code });
         }
         res.json({ message: "Tạo kỳ học thành công", id: result.insertId });
     });
