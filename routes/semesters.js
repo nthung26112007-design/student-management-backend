@@ -31,21 +31,29 @@ router.post("/", verifyToken, verifyAdmin, (req, res) => {
         return res.status(400).json({ message: "Thiếu thông tin bắt buộc: name, start_date, end_date" });
     }
 
-    const row = {
-        name: data.name,
-        start_date: data.start_date,
-        end_date: data.end_date,
-    };
-    if (data.status) row.status = data.status;
-    if (data.description) row.description = data.description;
-    if (data.class_name) row.class_name = data.class_name;
-
-    db.query("INSERT INTO semesters SET ?", row, (err, result) => {
-        if (err) {
-            console.error('[POST /semesters] INSERT error:', err);
-            return res.status(500).json({ message: "Lỗi INSERT", detail: err.message, code: err.code });
+    // Kiểm tra trùng tên + lớp
+    db.query("SELECT id FROM semesters WHERE name = ? AND class_name = ?", [data.name, data.class_name], (err, existing) => {
+        if (err) return res.status(500).json({ message: "Lỗi kiểm tra", detail: err.message });
+        if (existing.length > 0) {
+            return res.status(400).json({ message: "Học kỳ đã tồn tại cho lớp này!" });
         }
-        res.json({ message: "Tạo kỳ học thành công", id: result.insertId });
+
+        const row = {
+            name: data.name,
+            start_date: data.start_date,
+            end_date: data.end_date,
+        };
+        if (data.status) row.status = data.status;
+        if (data.description) row.description = data.description;
+        if (data.class_name) row.class_name = data.class_name;
+
+        db.query("INSERT INTO semesters SET ?", row, (err, result) => {
+            if (err) {
+                console.error('[POST /semesters] INSERT error:', err);
+                return res.status(500).json({ message: "Lỗi INSERT", detail: err.message, code: err.code });
+            }
+            res.json({ message: "Tạo kỳ học thành công", id: result.insertId });
+        });
     });
 });
 

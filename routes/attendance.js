@@ -1,255 +1,289 @@
 const express = require('express');
 const router = express.Router();
-
 const db = require('../db');
 const { verifyToken } = require('../controllers/middleware/auth');
 
 const isStaff = (user) => user.role === 'admin' || user.role === 'teacher';
 
+const parseNote = (raw) => {
+  if (!raw) return { note: '' };
+  try {
+    const value = JSON.parse(raw);
+    if (value && typeof value === 'object' && value._sync_meta === true) {
+      return {
+        note: value.note || '',
+        start_time: value.start_time || '',
+        end_time: value.end_time || '',
+        room: value.room || '',
+        subject_code: value.subject_code || '',
+        lecturer: value.lecturer || '',
+      };
+    }
+  } catch (_) {}
+  return { note: raw };
+};
+
+const serializeNote = (body, oldNote = '') => JSON.stringify({
+  _sync_meta: true,
+  note: body.note ?? oldNote ?? '',
+  start_time: body.start_time || '',
+  end_time: body.end_time || '',
+  room: body.room || '',
+  subject_code: body.subject_code || '',
+  lecturer: body.lecturer || '',
+});
+
+const enrichSessions = (rows) => rows.map((row) => ({
+  ...row,
+  ...parseNote(row.note),
+  note_raw: row.note,
+}));
+
 router.get('/sessions', verifyToken, (req, res) => {
   const { className, courseId } = req.query;
-
-  const run = (finalClassName) => {
-    let query = 'SELECT * FROM attendance_sessions WHERE 1=1';
+  const run = (resolvedClassName) => {
+    let query = `
+      SELECT ats.*, c.code subject_code_db, c.subject_name,
+             (SELECT COUNT(*) FROM students st
+              WHERE LOWER(TRIM(st.class_name))=LOWER(TRIM(ats.class_name))) total_count,
+             COALESCE(SUM(CASE WHEN ar.status='present' THEN 1 ELSE 0 END),0) present_count,
+             COALESCE(SUM(CASE WHEN ar.status='absent' THEN 1 ELSE 0 END),0) absent_count,
+             COALESCE(SUM(CASE WHEN ar.status='late' THEN 1 ELSE 0 END),0) late_count,
+             COALESCE(SUM(CASE WHEN ar.status='excused' THEN 1 ELSE 0 END),0) excused_count
+      FROM attendance_sessions ats
+      LEFT JOIN courses c ON c.id=ats.course_id
+      LEFT JOIN attendance_records ar ON ar.session_id=ats.id
+      WHERE 1=1
+    `;
     const params = [];
-
+    const finalClassName = className || resolvedClassName;
     if (finalClassName) {
-      query += ' AND class_name = ?';
+      query += ' AND LOWER(TRIM(ats.class_name))=LOWER(TRIM(?))';
       params.push(finalClassName);
     }
     if (courseId) {
-      query += ' AND course_id = ?';
+      query += ' AND ats.course_id=?';
       params.push(courseId);
     }
-
-    query += ' ORDER BY session_date DESC, id DESC';
-    db.query(query, params, (err, result) => {
-      if (err) {
-        console.error('GET /attendance/sessions query error:', err);
-        return res.status(500).json(err);
-      }
+    query += ' GROUP BY ats.id, c.code, c.subject_name ORDER BY ats.session_date DESC, ats.id DESC';
+    db.query(query, params, (err, rows) => {
+      if (err) return res.status(500).json({ message: 'Không tải được buổi điểm danh', error: err.message });
+      const result = enrichSessions(rows).map((row) => ({
+        ...row,
+        subject_code: row.subject_code || row.subject_code_db || '',
+        subject_name: row.subject_name || row.session_title,
+      }));
       res.json(result);
     });
   };
 
   if (req.user.role === 'student' && !className) {
-    db.query(
-      'SELECT class_name FROM students WHERE id = ?',
-      [req.user.student_id],
-      (err, rows) => {
-        if (err) {
-          console.error('GET /attendance/sessions student lookup error:', err);
-          return res.status(500).json(err);
-        }
-        run(rows?.[0]?.class_name || null);
-      }
-    );
-    return;
+    return db.query('SELECT class_name FROM students WHERE id=?', [req.user.student_id], (err, rows) => {
+      if (err) return res.status(500).json({ message: 'Không xác định được lớp', error: err.message });
+      run(rows[0]?.class_name || null);
+    });
   }
-
-  run(className || null);
+  run(null);
 });
 
 router.get('/sessions/:id', verifyToken, (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id) || id <= 0) {
-    return res.status(400).json('Invalid session id');
-  }
-
-  db.query('SELECT * FROM attendance_sessions WHERE id = ? LIMIT 1', [id], (err, result) => {
-    if (err) {
-      console.error('GET /attendance/sessions/:id query error:', err);
-      return res.status(500).json(err);
+  const run = (className) => {
+    let sql = 'SELECT * FROM attendance_sessions WHERE id=?';
+    const params = [req.params.id];
+    if (className) {
+      sql += ' AND LOWER(TRIM(class_name))=LOWER(TRIM(?))';
+      params.push(className);
     }
-    const item = result?.[0];
-    if (!item) return res.status(404).json('Not found');
-    res.json(item);
-  });
+    sql += ' LIMIT 1';
+    db.query(sql, params, (err, rows) => {
+      if (err) return res.status(500).json({ message: 'Không tải được buổi điểm danh', error: err.message });
+      if (!rows.length) return res.status(404).json({ message: 'Không tìm thấy buổi điểm danh' });
+      return res.json(enrichSessions(rows)[0]);
+    });
+  };
+  if (req.user.role === 'student') {
+    return db.query('SELECT class_name FROM students WHERE id=?', [req.user.student_id], (err, rows) => {
+      if (err) return res.status(500).json({ message: 'Không xác định được lớp', error: err.message });
+      return run(rows[0]?.class_name || '__NO_CLASS__');
+    });
+  }
+  return run(null);
 });
 
 router.post('/sessions', verifyToken, (req, res) => {
-  if (!isStaff(req.user)) return res.status(403).json('Forbidden');
-  db.query('INSERT INTO attendance_sessions SET ?', req.body, (err, result) => {
-    if (err) {
-      console.error('POST /attendance/sessions INSERT error:', err);
-      return res.status(500).json({ error: 'INSERT_SESSION_FAILED', message: err.message });
+  if (!isStaff(req.user)) return res.status(403).json({ message: 'Không có quyền tạo buổi điểm danh' });
+  const { session_title, session_date, class_name, course_id } = req.body;
+  if (!session_title || !session_date || !class_name) {
+    return res.status(400).json({ message: 'Thiếu tên buổi, ngày hoặc lớp' });
+  }
+  const row = {
+    session_title,
+    session_date,
+    class_name,
+    course_id: course_id || null,
+    note: serializeNote(req.body),
+  };
+  db.query('INSERT INTO attendance_sessions SET ?', row, (err, result) => {
+    if (err) return res.status(500).json({ message: 'Không tạo được buổi điểm danh', error: err.message });
+    res.status(201).json({ message: 'Tạo buổi điểm danh thành công', id: result.insertId });
+  });
+});
+
+router.put('/sessions/:id', verifyToken, (req, res) => {
+  if (!isStaff(req.user)) return res.status(403).json({ message: 'Không có quyền sửa buổi điểm danh' });
+  db.query('SELECT note FROM attendance_sessions WHERE id=?', [req.params.id], (findErr, rows) => {
+    if (findErr) return res.status(500).json({ message: 'Không tải được dữ liệu cũ', error: findErr.message });
+    if (!rows.length) return res.status(404).json({ message: 'Không tìm thấy buổi điểm danh' });
+    const old = parseNote(rows[0].note);
+    const row = {};
+    for (const key of ['session_title', 'session_date', 'class_name', 'course_id']) {
+      if (req.body[key] !== undefined) row[key] = req.body[key] || null;
     }
-    res.json({ message: 'Tạo buổi điểm danh thành công', id: result.insertId });
+    row.note = serializeNote({ ...old, ...req.body }, old.note);
+    db.query('UPDATE attendance_sessions SET ? WHERE id=?', [row, req.params.id], (err, result) => {
+      if (err) return res.status(500).json({ message: 'Không cập nhật được buổi điểm danh', error: err.message });
+      res.json({ message: 'Cập nhật buổi điểm danh thành công', affectedRows: result.affectedRows });
+    });
+  });
+});
+
+router.delete('/sessions/:id', verifyToken, (req, res) => {
+  if (!isStaff(req.user)) return res.status(403).json({ message: 'Không có quyền xóa buổi điểm danh' });
+  db.query('DELETE FROM attendance_sessions WHERE id=?', [req.params.id], (err, result) => {
+    if (err) return res.status(500).json({ message: 'Không xóa được buổi điểm danh', error: err.message });
+    if (!result.affectedRows) return res.status(404).json({ message: 'Không tìm thấy buổi điểm danh' });
+    res.json({ message: 'Xóa buổi điểm danh thành công' });
   });
 });
 
 router.get('/records', verifyToken, (req, res) => {
   const { sessionId, studentId } = req.query;
-
-  const loadRecords = (studentIds = null) => {
-    let query = 'SELECT * FROM attendance_records WHERE 1=1';
-    const params = [];
-
-    if (sessionId) {
-      query += ' AND session_id = ?';
-      params.push(sessionId);
-    }
-
-    if (Array.isArray(studentIds) && studentIds.length > 0) {
-      query += ` AND student_id IN (${studentIds.map(() => '?').join(',')})`;
-      params.push(...studentIds);
-    } else if (studentIds) {
-      query += ' AND student_id = ?';
-      params.push(studentIds);
-    } else if (studentId) {
-      query += ' AND student_id = ?';
-      params.push(studentId);
-    }
-
-    query += ' ORDER BY id DESC';
-    db.query(query, params, (err, result) => {
-      if (err) return res.status(500).json(err);
-      res.json(result);
-    });
-  };
-
-  if (req.user.role === 'student' && !studentId) {
-    return db.query(
-      'SELECT class_name FROM students WHERE id = ?',
-      [req.user.student_id],
-      (err, rows) => {
-        if (err) return res.status(500).json(err);
-        const className = rows?.[0]?.class_name;
-        if (!className) return loadRecords(req.user.student_id);
-        db.query(
-          'SELECT id FROM students WHERE class_name = ?',
-          [className],
-          (err2, studentRows) => {
-            if (err2) return res.status(500).json(err2);
-            const studentIds = studentRows.map((s) => s.id);
-            loadRecords(studentIds.length ? studentIds : req.user.student_id);
-          }
-        );
-      }
-    );
+  let query = `
+    SELECT ar.*, st.student_code, st.full_name, st.class_name
+    FROM attendance_records ar
+    INNER JOIN students st ON st.id=ar.student_id
+    WHERE 1=1
+  `;
+  const params = [];
+  if (sessionId) {
+    query += ' AND ar.session_id=?';
+    params.push(sessionId);
   }
-
-  loadRecords();
-});
-
-router.get('/records/:id', verifyToken, (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id) || id <= 0) {
-    return res.status(400).json('Invalid record id');
+  if (req.user.role === 'student') {
+    query += ' AND ar.student_id=?';
+    params.push(req.user.student_id);
+  } else if (studentId) {
+    query += ' AND ar.student_id=?';
+    params.push(studentId);
   }
-
-  db.query('SELECT * FROM attendance_records WHERE id = ? LIMIT 1', [id], (err, result) => {
-    if (err) {
-      console.error('GET /attendance/records/:id query error:', err);
-      return res.status(500).json(err);
-    }
-    const item = result?.[0];
-    if (!item) return res.status(404).json('Not found');
-    res.json(item);
+  query += ' ORDER BY st.full_name, ar.id DESC';
+  db.query(query, params, (err, rows) => {
+    if (err) return res.status(500).json({ message: 'Không tải được điểm danh', error: err.message });
+    res.json(rows);
   });
 });
 
 router.post('/records/bulk', verifyToken, (req, res) => {
-  if (!isStaff(req.user)) return res.status(403).json('Forbidden');
-  const { sessionId, records } = req.body;
-  if (!sessionId || !Array.isArray(records)) return res.status(400).json('Invalid payload');
+  if (!isStaff(req.user)) return res.status(403).json({ message: 'Không có quyền lưu điểm danh' });
+  const sessionId = Number(req.body.sessionId);
+  const records = Array.isArray(req.body.records) ? req.body.records : [];
+  if (!sessionId || !records.length) return res.status(400).json({ message: 'Danh sách điểm danh trống' });
 
-  const values = records.map((record) => [
-    sessionId,
-    record.student_id,
-    record.status,
-    record.note || null,
-  ]);
-
-  db.query(
-    'INSERT INTO attendance_records (session_id, student_id, status, note) VALUES ?',
-    [values],
-    (err, result) => {
-      if (err) {
-        console.error('POST /attendance/records/bulk INSERT error:', err);
-        return res.status(500).json({ error: 'INSERT_RECORDS_FAILED', message: err.message });
+  db.getConnection((connectionErr, connection) => {
+    if (connectionErr) return res.status(500).json({ message: 'Không kết nối được cơ sở dữ liệu', error: connectionErr.message });
+    connection.beginTransaction((beginErr) => {
+      if (beginErr) {
+        connection.release();
+        return res.status(500).json({ message: 'Không bắt đầu được giao dịch', error: beginErr.message });
       }
-      res.json({ message: 'Lưu điểm danh thành công', affectedRows: result.affectedRows });
-    }
-  );
+      const ids = records.map((r) => Number(r.student_id)).filter(Boolean);
+      if (!ids.length) {
+        return connection.rollback(() => {
+          connection.release();
+          res.status(400).json({ message: 'Không có mã sinh viên hợp lệ để đồng bộ' });
+        });
+      }
+      const placeholders = ids.map(() => '?').join(',');
+      connection.query(
+        `DELETE FROM attendance_records WHERE session_id=? AND student_id IN (${placeholders})`,
+        [sessionId, ...ids],
+        (deleteErr) => {
+          if (deleteErr) return connection.rollback(() => {
+            connection.release();
+            res.status(500).json({ message: 'Không đồng bộ được bản ghi cũ', error: deleteErr.message });
+          });
+          const values = records.map((r) => [sessionId, r.student_id, r.status || 'unmarked', r.note || null]);
+          connection.query(
+            'INSERT INTO attendance_records (session_id, student_id, status, note) VALUES ?',
+            [values],
+            (insertErr, result) => {
+              if (insertErr) return connection.rollback(() => {
+                connection.release();
+                res.status(500).json({ message: 'Không lưu được điểm danh', error: insertErr.message });
+              });
+              connection.commit((commitErr) => {
+                if (commitErr) return connection.rollback(() => {
+                  connection.release();
+                  res.status(500).json({ message: 'Không hoàn tất đồng bộ', error: commitErr.message });
+                });
+                connection.release();
+                res.json({ message: 'Đồng bộ điểm danh thành công', affectedRows: result.affectedRows });
+              });
+            },
+          );
+        },
+      );
+    });
+  });
 });
 
 router.put('/records/:id', verifyToken, (req, res) => {
-  if (!isStaff(req.user)) return res.status(403).json('Forbidden');
-  const { id } = req.params;
-  db.query('UPDATE attendance_records SET ? WHERE id = ?', [req.body, id], (err, result) => {
-    if (err) return res.status(500).json(err);
+  if (!isStaff(req.user)) return res.status(403).json({ message: 'Không có quyền sửa điểm danh' });
+  const row = {};
+  if (req.body.status !== undefined) row.status = req.body.status;
+  if (req.body.note !== undefined) row.note = req.body.note;
+  if (!Object.keys(row).length) return res.status(400).json({ message: 'Không có dữ liệu cập nhật' });
+  db.query('UPDATE attendance_records SET ? WHERE id=?', [row, req.params.id], (err, result) => {
+    if (err) return res.status(500).json({ message: 'Không cập nhật được điểm danh', error: err.message });
     res.json({ message: 'Cập nhật điểm danh thành công', affectedRows: result.affectedRows });
   });
 });
 
 router.get('/summary', verifyToken, (req, res) => {
   const { studentId, className, courseId } = req.query;
-
-  const buildBaseQuery = () => {
-    let query = `
-      SELECT
-        s.id AS student_id,
-        s.full_name,
-        s.student_code,
-        s.class_name,
-        COUNT(ar.id) AS total_sessions,
-        COALESCE(SUM(CASE WHEN ar.status = 'present' THEN 1 ELSE 0 END), 0) AS present_count,
-        COALESCE(SUM(CASE WHEN ar.status = 'absent' THEN 1 ELSE 0 END), 0) AS absent_count,
-        COALESCE(SUM(CASE WHEN ar.status = 'late' THEN 1 ELSE 0 END), 0) AS late_count,
-        COALESCE(SUM(CASE WHEN ar.status = 'excused' THEN 1 ELSE 0 END), 0) AS excused_count
-      FROM students s
-      LEFT JOIN attendance_records ar ON ar.student_id = s.id
-      LEFT JOIN attendance_sessions ats ON ats.id = ar.session_id
-      WHERE 1=1
-    `;
-    const params = [];
-
-    if (studentId) {
-      query += ' AND s.id = ?';
-      params.push(studentId);
-    }
-    if (className) {
-      query += ' AND s.class_name = ?';
-      params.push(className);
-    }
-    if (courseId) {
-      query += ' AND EXISTS (SELECT 1 FROM attendance_records ar2 INNER JOIN attendance_sessions ats2 ON ats2.id = ar2.session_id WHERE ar2.student_id = s.id AND ats2.course_id = ?)' ;
-      params.push(courseId);
-    }
-
-    query += ' GROUP BY s.id, s.full_name, s.student_code, s.class_name ORDER BY s.full_name';
-    return { query, params };
-  };
-
-  const runSummary = () => {
-    const { query, params } = buildBaseQuery();
-    db.query(query, params, (err, result) => {
-      if (err) {
-        console.error('GET /attendance/summary query error:', err);
-        return res.status(500).json(err);
-      }
-      res.json(result);
-    });
-  };
-
-  if (req.user.role === 'student' && !studentId) {
-    return db.query('SELECT class_name FROM students WHERE id = ?', [req.user.student_id], (err, rows) => {
-      if (err) {
-        console.error('GET /attendance/summary student lookup error:', err);
-        return res.status(500).json(err);
-      }
-      const classNameFromDb = rows?.[0]?.class_name;
-      if (classNameFromDb && !className) {
-        req.query.className = classNameFromDb;
-      } else if (!classNameFromDb) {
-        req.query.studentId = req.user.student_id;
-      }
-      runSummary();
-    });
+  let query = `
+    SELECT st.id student_id, st.full_name, st.student_code, st.class_name,
+           COUNT(ar.id) total_sessions,
+           COALESCE(SUM(CASE WHEN ar.status='present' THEN 1 ELSE 0 END),0) present_count,
+           COALESCE(SUM(CASE WHEN ar.status='absent' THEN 1 ELSE 0 END),0) absent_count,
+           COALESCE(SUM(CASE WHEN ar.status='late' THEN 1 ELSE 0 END),0) late_count,
+           COALESCE(SUM(CASE WHEN ar.status='excused' THEN 1 ELSE 0 END),0) excused_count
+    FROM students st
+    LEFT JOIN attendance_records ar ON ar.student_id=st.id
+    LEFT JOIN attendance_sessions ats ON ats.id=ar.session_id
+    WHERE 1=1
+  `;
+  const params = [];
+  if (req.user.role === 'student') {
+    query += ' AND st.id=?';
+    params.push(req.user.student_id);
+  } else if (studentId) {
+    query += ' AND st.id=?';
+    params.push(studentId);
   }
-
-  runSummary();
+  if (className) {
+    query += ' AND LOWER(TRIM(st.class_name))=LOWER(TRIM(?))';
+    params.push(className);
+  }
+  if (courseId) {
+    query += ' AND ats.course_id=?';
+    params.push(courseId);
+  }
+  query += ' GROUP BY st.id, st.full_name, st.student_code, st.class_name ORDER BY st.full_name';
+  db.query(query, params, (err, rows) => {
+    if (err) return res.status(500).json({ message: 'Không tải được tổng hợp điểm danh', error: err.message });
+    res.json(rows);
+  });
 });
 
 module.exports = router;

@@ -41,7 +41,7 @@ app.use((req, res, next) => {
     next();
 });
 
-require("./db");
+const db = require("./db");
 
 const authRoutes = require("./routes/auth");
 const studentRoutes = require("./routes/students");
@@ -53,11 +53,15 @@ const feeRoutes = require("./routes/fees");
 const scheduleRoutes = require("./routes/schedules");
 const profileRoutes = require("./routes/profile");
 const diagnosticsRoutes = require("./routes/diagnostics");
+const classRoutes = require("./routes/classes");
+const statsRoutes = require("./routes/stats");
 
-app.use(express.json());
+app.use(express.json({ limit: "8mb" }));
+app.use(express.urlencoded({ extended: true, limit: "8mb" }));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/students", studentRoutes);
+app.use("/api/classes", classRoutes);
 app.use("/api/grades", gradeRoutes);
 app.use("/api/semesters", semesterRoutes);
 app.use("/api/courses", courseRoutes);
@@ -66,13 +70,33 @@ app.use("/api/fees", feeRoutes);
 app.use("/api/schedules", scheduleRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/diagnostics", diagnosticsRoutes);
+app.use("/api/stats", statsRoutes);
 
 app.get("/", (req, res) => {
     res.send("Backend running OK");
 });
 
-app.get("/api/fees/health", (req, res) => {
-    res.json({ message: "fees route is mounted" });
+app.get("/api/health", (req, res) => {
+    db.query("SELECT 1 AS ok", (err) => {
+        if (err) {
+            return res.status(503).json({
+                ok: false,
+                database: false,
+                message: "Máy chủ hoạt động nhưng chưa kết nối được cơ sở dữ liệu",
+                serverTime: new Date().toISOString(),
+            });
+        }
+        return res.json({
+            ok: true,
+            database: true,
+            serverTime: new Date().toISOString(),
+        });
+    });
+});
+
+app.use((err, req, res, next) => {
+    console.error("Unhandled error:", err);
+    res.status(500).json({ message: "Lỗi máy chủ", error: err.message });
 });
 
 const PORT = process.env.PORT || 3000;
