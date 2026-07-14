@@ -55,6 +55,7 @@ const profileRoutes = require("./routes/profile");
 const diagnosticsRoutes = require("./routes/diagnostics");
 const classRoutes = require("./routes/classes");
 const statsRoutes = require("./routes/stats");
+const teacherRoutes = require("./routes/teachers");
 
 app.use(express.json({ limit: "8mb" }));
 app.use(express.urlencoded({ extended: true, limit: "8mb" }));
@@ -62,6 +63,7 @@ app.use(express.urlencoded({ extended: true, limit: "8mb" }));
 app.use("/api/auth", authRoutes);
 app.use("/api/students", studentRoutes);
 app.use("/api/classes", classRoutes);
+app.use("/api/teachers", teacherRoutes);
 app.use("/api/grades", gradeRoutes);
 app.use("/api/semesters", semesterRoutes);
 app.use("/api/courses", courseRoutes);
