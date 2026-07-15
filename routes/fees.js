@@ -10,6 +10,7 @@ router.get('/invoices', verifyToken, (req, res) => {
   const studentId = resolveStudentId(req, req.query.studentId);
   let query = `
     SELECT i.*, s.full_name, s.student_code, s.class_name student_class_name,
+           sem.name semester_name,
            COALESCE(pay.paid_amount,0) paid_amount,
            GREATEST(i.amount-COALESCE(pay.paid_amount,0),0) remaining_amount,
            CASE
@@ -19,6 +20,7 @@ router.get('/invoices', verifyToken, (req, res) => {
            END calculated_status
     FROM tuition_invoices i
     LEFT JOIN students s ON s.id=i.student_id
+    LEFT JOIN semesters sem ON sem.id=i.semester_id
     LEFT JOIN (
       SELECT invoice_id, SUM(amount) paid_amount
       FROM tuition_payments GROUP BY invoice_id
@@ -59,6 +61,103 @@ router.post('/invoices', verifyToken, (req, res) => {
         res.status(201).json({ message: 'Tạo hóa đơn học phí thành công', id: result.insertId, invoice_code: code });
       },
     );
+  });
+});
+
+router.post('/invoices/bulk', verifyToken, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ message: 'Chỉ quản trị viên được tạo hóa đơn theo lớp' });
+  const className = String(req.body.class_name || '').trim();
+  const semesterId = Number(req.body.semester_id);
+  const unitPrice = 350000;
+  const dueDate = req.body.due_date || new Date().toISOString().slice(0, 10);
+  if (!className || !Number.isInteger(semesterId) || semesterId <= 0) {
+    return res.status(400).json({ message: 'Lớp và học kỳ là bắt buộc' });
+  }
+
+  db.getConnection((connectionErr, connection) => {
+    if (connectionErr) return res.status(500).json({ message: 'Không kết nối được cơ sở dữ liệu', error: connectionErr.message });
+    connection.beginTransaction((beginErr) => {
+      if (beginErr) {
+        connection.release();
+        return res.status(500).json({ message: 'Không bắt đầu được giao dịch', error: beginErr.message });
+      }
+      connection.query(
+        `SELECT COALESCE(SUM(credits),0) total_credits
+         FROM courses WHERE BINARY class_name = BINARY ? AND semester_id = ?`,
+        [className, semesterId],
+        (creditErr, creditRows) => {
+          if (creditErr) return connection.rollback(() => {
+            connection.release();
+            res.status(500).json({ message: 'Không tính được tổng tín chỉ', error: creditErr.message });
+          });
+          const credits = Number(creditRows[0]?.total_credits || 0);
+          if (credits <= 0) return connection.rollback(() => {
+            connection.release();
+            res.status(400).json({ message: 'Lớp chưa có môn học hoặc tín chỉ trong học kỳ đã chọn' });
+          });
+          connection.query(
+            'SELECT id, student_code FROM students WHERE BINARY class_name = BINARY ? ORDER BY id',
+            [className],
+            (studentErr, students) => {
+              if (studentErr || !students.length) return connection.rollback(() => {
+                connection.release();
+                res.status(studentErr ? 500 : 400).json({
+                  message: studentErr ? 'Không tải được sinh viên của lớp' : 'Lớp chưa có sinh viên',
+                  error: studentErr?.message,
+                });
+              });
+              connection.query(
+                `SELECT student_id FROM tuition_invoices
+                 WHERE BINARY class_name = BINARY ? AND semester_id = ?`,
+                [className, semesterId],
+                (existingErr, existingRows) => {
+                  if (existingErr) return connection.rollback(() => {
+                    connection.release();
+                    res.status(500).json({ message: 'Không kiểm tra được hóa đơn trùng', error: existingErr.message });
+                  });
+                  const existingIds = new Set(existingRows.map((row) => Number(row.student_id)));
+                  const pending = students.filter((student) => !existingIds.has(Number(student.id)));
+                  if (!pending.length) return connection.rollback(() => {
+                    connection.release();
+                    res.status(409).json({ message: 'Lớp đã có đủ hóa đơn cho học kỳ này' });
+                  });
+                  const amount = credits * unitPrice;
+                  const prefix = `HP-${semesterId}-${className}-${Date.now()}`;
+                  const values = pending.map((student) => [
+                    student.id, amount, 'unpaid', dueDate, req.body.note || null,
+                    `${prefix}-${student.student_code}`, req.body.title || `Học phí học kỳ ${semesterId}`,
+                    className, semesterId, credits, unitPrice,
+                  ]);
+                  connection.query(
+                    `INSERT INTO tuition_invoices
+                     (student_id, amount, status, due_date, note, invoice_code, title, class_name,
+                      semester_id, credits, tuition_per_credit) VALUES ?`,
+                    [values],
+                    (insertErr) => {
+                      if (insertErr) return connection.rollback(() => {
+                        connection.release();
+                        res.status(500).json({ message: 'Không tạo được hóa đơn hàng loạt', error: insertErr.message });
+                      });
+                      connection.commit((commitErr) => {
+                        if (commitErr) return connection.rollback(() => {
+                          connection.release();
+                          res.status(500).json({ message: 'Không hoàn tất tạo hóa đơn', error: commitErr.message });
+                        });
+                        connection.release();
+                        res.status(201).json({
+                          message: `Đã tạo ${pending.length} hóa đơn`, created: pending.length,
+                          skipped: students.length - pending.length, credits, unit_price: unitPrice, amount,
+                        });
+                      });
+                    },
+                  );
+                },
+              );
+            },
+          );
+        },
+      );
+    });
   });
 });
 

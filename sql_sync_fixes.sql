@@ -122,6 +122,9 @@ CALL add_column_if_missing('students', 'academic_status', 'VARCHAR(50) DEFAULT '
 CALL add_column_if_missing('students', 'avatar_url', 'LONGTEXT NULL');
 CALL add_column_if_missing('schedules', 'teacher_id', 'INT NULL');
 CALL add_column_if_missing('attendance_sessions', 'teacher_id', 'INT NULL');
+CALL add_column_if_missing('tuition_invoices', 'semester_id', 'INT NULL');
+CALL add_column_if_missing('tuition_invoices', 'credits', 'INT NOT NULL DEFAULT 0');
+CALL add_column_if_missing('tuition_invoices', 'tuition_per_credit', 'DECIMAL(14,2) NOT NULL DEFAULT 350000');
 CALL add_column_if_missing('scores', 'course_id', 'INT NULL');
 CALL add_column_if_missing('scores', 'semester_id', 'INT NULL');
 CALL add_column_if_missing('scores', 'cc_score', 'DECIMAL(5,2) NULL');
@@ -174,6 +177,7 @@ DELIMITER ;
 
 CALL add_index_if_missing('attendance_records', 'uq_attendance_session_student', '`session_id`,`student_id`');
 CALL add_index_if_missing('attendance_sessions', 'idx_attendance_sessions_teacher_id', '`teacher_id`');
+CALL add_index_if_missing('tuition_invoices', 'idx_tuition_class_semester_student', '`class_name`,`semester_id`,`student_id`');
 CALL add_index_if_missing('scores', 'uq_score_student_course_semester', '`student_id`,`course_id`,`semester_id`');
 DROP PROCEDURE IF EXISTS add_index_if_missing;
 
