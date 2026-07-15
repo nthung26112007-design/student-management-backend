@@ -21,7 +21,7 @@ router.get("/", (req, res) => {
 
 // POST add a new teacher
 router.post("/", (req, res) => {
-    const { teacher_code, full_name, email, phone, department, status } = req.body;
+    const { teacher_code, full_name, email, phone, department, status, password } = req.body;
     if (!teacher_code || !full_name) {
         return res.status(400).json({ error: "teacher_code and full_name are required" });
     }
@@ -33,7 +33,9 @@ router.post("/", (req, res) => {
     db.query(sqlTeacher, [teacher_code, full_name, email, phone, department, st], (err, result) => {
         if (err) return res.status(500).json({ error: "Failed to create teacher: " + err.message });
 
-        bcrypt.hash(teacher_code, 10, (hashErr, hash) => {
+        const passToHash = password && password.trim() !== '' ? password : teacher_code;
+
+        bcrypt.hash(passToHash, 10, (hashErr, hash) => {
             if (hashErr) {
                 return res.status(201).json({ 
                     message: "Teacher added successfully, but failed to create login account", 

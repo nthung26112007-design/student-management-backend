@@ -11,6 +11,7 @@ router.get("/", verifyToken, (req, res) => {
     const buildAndReturnCourses = (resolvedClassName = null) => {
         let query = `
             SELECT c.id, c.subject_name as name, c.code, c.class_name, c.semester_id, c.teacher_id, c.credits, c.status,
+                   c.theory_hours, c.practice_hours, c.course_type, c.exam_form,
                    s.name as semester_name, u.username as teacher_name
             FROM courses c
             LEFT JOIN semesters s ON c.semester_id = s.id
@@ -95,6 +96,10 @@ router.post("/", verifyToken, verifyAdmin, (req, res) => {
         if (data.class_name) row.class_name = data.class_name;
         if (data.credits != null) row.credits = data.credits;
         if (data.status) row.status = data.status;
+        if (data.theory_hours != null) row.theory_hours = data.theory_hours;
+        if (data.practice_hours != null) row.practice_hours = data.practice_hours;
+        if (data.course_type) row.course_type = data.course_type;
+        if (data.exam_form) row.exam_form = data.exam_form;
 
         db.query("INSERT INTO courses SET ?", row, (err, result) => {
             if (err) {
@@ -118,6 +123,10 @@ router.put("/:id", verifyToken, verifyAdmin, (req, res) => {
     if (data.class_name) row.class_name = data.class_name;
     if (data.credits != null) row.credits = data.credits;
     if (data.status) row.status = data.status;
+    if (data.theory_hours != null) row.theory_hours = data.theory_hours;
+    if (data.practice_hours != null) row.practice_hours = data.practice_hours;
+    if (data.course_type) row.course_type = data.course_type;
+    if (data.exam_form) row.exam_form = data.exam_form;
 
     if (Object.keys(row).length === 0) {
         return res.status(400).json({ message: "Không có dữ liệu cập nhật" });
