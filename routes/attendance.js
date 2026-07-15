@@ -4,6 +4,7 @@ const db = require('../db');
 const { verifyToken } = require('../controllers/middleware/auth');
 
 const isStaff = (user) => user.role === 'admin' || user.role === 'teacher';
+const isAdmin = (user) => user.role === 'admin';
 
 const parseNote = (raw) => {
   if (!raw) return { note: '' };
@@ -44,14 +45,16 @@ router.get('/sessions', verifyToken, (req, res) => {
   const run = (resolvedClassName) => {
     let query = `
       SELECT ats.*, c.code subject_code_db, c.subject_name,
+             t.full_name teacher_name, t.teacher_code,
              (SELECT COUNT(*) FROM students st
-              WHERE st.class_name = ats.class_name) total_count,
+              WHERE BINARY st.class_name = BINARY ats.class_name) total_count,
              COALESCE(SUM(CASE WHEN ar.status='present' THEN 1 ELSE 0 END),0) present_count,
              COALESCE(SUM(CASE WHEN ar.status='absent' THEN 1 ELSE 0 END),0) absent_count,
              COALESCE(SUM(CASE WHEN ar.status='late' THEN 1 ELSE 0 END),0) late_count,
              COALESCE(SUM(CASE WHEN ar.status='excused' THEN 1 ELSE 0 END),0) excused_count
       FROM attendance_sessions ats
       LEFT JOIN courses c ON c.id=ats.course_id
+      LEFT JOIN teachers t ON t.id=ats.teacher_id
       LEFT JOIN attendance_records ar ON ar.session_id=ats.id
       WHERE 1=1
     `;
@@ -65,13 +68,24 @@ router.get('/sessions', verifyToken, (req, res) => {
       query += ' AND ats.course_id=?';
       params.push(courseId);
     }
-    query += ' GROUP BY ats.id, c.code, c.subject_name ORDER BY ats.session_date DESC, ats.id DESC';
+    if (req.user.role === 'teacher') {
+      query += ` AND ats.teacher_id IN (
+        SELECT teacher_account.id
+        FROM teachers teacher_account
+        INNER JOIN users teacher_user
+          ON BINARY teacher_user.username = BINARY teacher_account.teacher_code
+        WHERE teacher_user.id = ?
+      )`;
+      params.push(req.user.id);
+    }
+    query += ' GROUP BY ats.id, c.code, c.subject_name, t.full_name, t.teacher_code ORDER BY ats.session_date DESC, ats.id DESC';
     db.query(query, params, (err, rows) => {
       if (err) return res.status(500).json({ message: 'Không tải được buổi điểm danh', error: err.message });
       const result = enrichSessions(rows).map((row) => ({
         ...row,
         subject_code: row.subject_code || row.subject_code_db || '',
         subject_name: row.subject_name || row.session_title,
+        lecturer: row.teacher_name || row.lecturer || '',
       }));
       res.json(result);
     });
@@ -88,17 +102,31 @@ router.get('/sessions', verifyToken, (req, res) => {
 
 router.get('/sessions/:id', verifyToken, (req, res) => {
   const run = (className) => {
-    let sql = 'SELECT * FROM attendance_sessions WHERE id=?';
+    let sql = `SELECT ats.*, t.full_name teacher_name, t.teacher_code
+               FROM attendance_sessions ats
+               LEFT JOIN teachers t ON t.id=ats.teacher_id
+               WHERE ats.id=?`;
     const params = [req.params.id];
     if (className) {
-      sql += ' AND class_name = ?';
+      sql += ' AND ats.class_name = ?';
       params.push(className);
+    }
+    if (req.user.role === 'teacher') {
+      sql += ` AND ats.teacher_id IN (
+        SELECT teacher_account.id FROM teachers teacher_account
+        INNER JOIN users teacher_user
+          ON BINARY teacher_user.username = BINARY teacher_account.teacher_code
+        WHERE teacher_user.id = ?
+      )`;
+      params.push(req.user.id);
     }
     sql += ' LIMIT 1';
     db.query(sql, params, (err, rows) => {
       if (err) return res.status(500).json({ message: 'Không tải được buổi điểm danh', error: err.message });
       if (!rows.length) return res.status(404).json({ message: 'Không tìm thấy buổi điểm danh' });
-      return res.json(enrichSessions(rows)[0]);
+      const result = enrichSessions(rows)[0];
+      result.lecturer = result.teacher_name || result.lecturer || '';
+      return res.json(result);
     });
   };
   if (req.user.role === 'student') {
@@ -112,7 +140,7 @@ router.get('/sessions/:id', verifyToken, (req, res) => {
 
 router.post('/sessions', verifyToken, (req, res) => {
   if (!isStaff(req.user)) return res.status(403).json({ message: 'Không có quyền tạo buổi điểm danh' });
-  const { session_title, session_date, class_name, course_id } = req.body;
+  const { session_title, session_date, class_name, course_id, teacher_id } = req.body;
   if (!session_title || !session_date || !class_name) {
     return res.status(400).json({ message: 'Thiếu tên buổi, ngày hoặc lớp' });
   }
@@ -121,6 +149,7 @@ router.post('/sessions', verifyToken, (req, res) => {
     session_date,
     class_name,
     course_id: course_id || null,
+    teacher_id: teacher_id || null,
     note: serializeNote(req.body),
   };
   db.query('INSERT INTO attendance_sessions SET ?', row, (err, result) => {
@@ -136,7 +165,7 @@ router.put('/sessions/:id', verifyToken, (req, res) => {
     if (!rows.length) return res.status(404).json({ message: 'Không tìm thấy buổi điểm danh' });
     const old = parseNote(rows[0].note);
     const row = {};
-    for (const key of ['session_title', 'session_date', 'class_name', 'course_id']) {
+    for (const key of ['session_title', 'session_date', 'class_name', 'course_id', 'teacher_id']) {
       if (req.body[key] !== undefined) row[key] = req.body[key] || null;
     }
     row.note = serializeNote({ ...old, ...req.body }, old.note);
@@ -200,7 +229,7 @@ router.post('/records/bulk', verifyToken, (req, res) => {
       if (!ids.length) {
         return connection.rollback(() => {
           connection.release();
-          res.status(400).json({ message: 'Không có mã sinh viên hợp lệ để đồng bộ' });
+          res.status(400).json({ message: 'Không có mã sinh viên hợp lệ để lưu' });
         });
       }
       const placeholders = ids.map(() => '?').join(',');
@@ -210,7 +239,7 @@ router.post('/records/bulk', verifyToken, (req, res) => {
         (deleteErr) => {
           if (deleteErr) return connection.rollback(() => {
             connection.release();
-            res.status(500).json({ message: 'Không đồng bộ được bản ghi cũ', error: deleteErr.message });
+            res.status(500).json({ message: 'Không thể cập nhật bản ghi điểm danh cũ', error: deleteErr.message });
           });
           const values = records.map((r) => [sessionId, r.student_id, r.status || 'unmarked', r.note || null]);
           connection.query(
@@ -224,10 +253,10 @@ router.post('/records/bulk', verifyToken, (req, res) => {
               connection.commit((commitErr) => {
                 if (commitErr) return connection.rollback(() => {
                   connection.release();
-                  res.status(500).json({ message: 'Không hoàn tất đồng bộ', error: commitErr.message });
+                  res.status(500).json({ message: 'Không hoàn tất lưu buổi điểm danh', error: commitErr.message });
                 });
                 connection.release();
-                res.json({ message: 'Đồng bộ điểm danh thành công', affectedRows: result.affectedRows });
+                res.json({ message: 'Lưu buổi điểm danh thành công', affectedRows: result.affectedRows });
               });
             },
           );

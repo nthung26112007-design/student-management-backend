@@ -120,6 +120,8 @@ CALL add_column_if_missing('semesters', 'status', 'VARCHAR(30) DEFAULT ''active'
 CALL add_column_if_missing('students', 'class_name', 'VARCHAR(100) NULL');
 CALL add_column_if_missing('students', 'academic_status', 'VARCHAR(50) DEFAULT ''Đang học''');
 CALL add_column_if_missing('students', 'avatar_url', 'LONGTEXT NULL');
+CALL add_column_if_missing('schedules', 'teacher_id', 'INT NULL');
+CALL add_column_if_missing('attendance_sessions', 'teacher_id', 'INT NULL');
 CALL add_column_if_missing('scores', 'course_id', 'INT NULL');
 CALL add_column_if_missing('scores', 'semester_id', 'INT NULL');
 CALL add_column_if_missing('scores', 'cc_score', 'DECIMAL(5,2) NULL');
@@ -171,6 +173,7 @@ END$$
 DELIMITER ;
 
 CALL add_index_if_missing('attendance_records', 'uq_attendance_session_student', '`session_id`,`student_id`');
+CALL add_index_if_missing('attendance_sessions', 'idx_attendance_sessions_teacher_id', '`teacher_id`');
 CALL add_index_if_missing('scores', 'uq_score_student_course_semester', '`student_id`,`course_id`,`semester_id`');
 DROP PROCEDURE IF EXISTS add_index_if_missing;
 
