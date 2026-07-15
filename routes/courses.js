@@ -27,7 +27,7 @@ router.get("/", verifyToken, (req, res) => {
 
         const finalClassName = class_name || resolvedClassName;
         if (finalClassName) {
-            query += " AND LOWER(TRIM(c.class_name)) = LOWER(TRIM(?))";
+            query += " AND c.class_name = ?";
             params.push(finalClassName);
         }
 
@@ -153,3 +153,4 @@ router.delete("/:id", verifyToken, verifyAdmin, (req, res) => {
 });
 
 module.exports = router;
+

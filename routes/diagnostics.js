@@ -23,8 +23,7 @@ router.get('/courses-class-mismatch', verifyToken, verifyAdmin, (req, res) => {
     AND EXISTS (
       SELECT 1
       FROM students st
-      WHERE LOWER(TRIM(st.class_name)) = LOWER(TRIM(c.class_name))
-    )
+      WHERE st.class_name = c.class_name)
     ORDER BY c.semester_id DESC, c.class_name ASC, c.subject_name ASC
   `;
 
@@ -81,3 +80,4 @@ router.get('/test-invoice-query', verifyToken, (req, res) => {
 });
 
 module.exports = router;
+

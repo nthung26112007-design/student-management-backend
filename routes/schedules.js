@@ -42,7 +42,7 @@ router.get('/', verifyToken, (req, res) => {
     }
     const finalClass = req.user.role === 'student' ? studentClass : className;
     if (finalClass) {
-      query += ' AND LOWER(TRIM(class_name))=LOWER(TRIM(?))';
+      query += ' AND class_name = ?';
       params.push(finalClass);
     }
     query += ' ORDER BY schedule_date ASC, schedule_time ASC, id DESC';
@@ -110,3 +110,4 @@ router.delete('/:id', verifyToken, (req, res) => {
 });
 
 module.exports = router;
+

@@ -45,7 +45,7 @@ router.get('/sessions', verifyToken, (req, res) => {
     let query = `
       SELECT ats.*, c.code subject_code_db, c.subject_name,
              (SELECT COUNT(*) FROM students st
-              WHERE LOWER(TRIM(st.class_name))=LOWER(TRIM(ats.class_name))) total_count,
+              WHERE st.class_name = ats.class_name) total_count,
              COALESCE(SUM(CASE WHEN ar.status='present' THEN 1 ELSE 0 END),0) present_count,
              COALESCE(SUM(CASE WHEN ar.status='absent' THEN 1 ELSE 0 END),0) absent_count,
              COALESCE(SUM(CASE WHEN ar.status='late' THEN 1 ELSE 0 END),0) late_count,
@@ -58,7 +58,7 @@ router.get('/sessions', verifyToken, (req, res) => {
     const params = [];
     const finalClassName = className || resolvedClassName;
     if (finalClassName) {
-      query += ' AND LOWER(TRIM(ats.class_name))=LOWER(TRIM(?))';
+      query += ' AND ats.class_name = ?';
       params.push(finalClassName);
     }
     if (courseId) {
@@ -91,7 +91,7 @@ router.get('/sessions/:id', verifyToken, (req, res) => {
     let sql = 'SELECT * FROM attendance_sessions WHERE id=?';
     const params = [req.params.id];
     if (className) {
-      sql += ' AND LOWER(TRIM(class_name))=LOWER(TRIM(?))';
+      sql += ' AND class_name = ?';
       params.push(className);
     }
     sql += ' LIMIT 1';
@@ -272,7 +272,7 @@ router.get('/summary', verifyToken, (req, res) => {
     params.push(studentId);
   }
   if (className) {
-    query += ' AND LOWER(TRIM(st.class_name))=LOWER(TRIM(?))';
+    query += ' AND st.class_name = ?';
     params.push(className);
   }
   if (courseId) {
@@ -287,3 +287,4 @@ router.get('/summary', verifyToken, (req, res) => {
 });
 
 module.exports = router;
+

@@ -20,10 +20,10 @@ router.get('/stats/summary', verifyToken, (req, res) => {
 router.get('/', verifyToken, (req, res) => {
   const { search, course_year, faculty } = req.query;
   let query = `
-    SELECT c.*,
-           (SELECT COUNT(*) FROM students s
-            WHERE LOWER(TRIM(s.class_name)) COLLATE utf8mb4_unicode_ci = LOWER(TRIM(c.name)) COLLATE utf8mb4_unicode_ci) student_count
-    FROM classes c WHERE 1=1
+      SELECT c.*,
+             (SELECT COUNT(*) FROM students s
+              WHERE s.class_name = c.name) student_count
+      FROM classes c WHERE 1=1
   `;
   const params = [];
   if (search) {
@@ -58,7 +58,7 @@ router.post('/', verifyToken, verifyAdmin, (req, res) => {
   const cleanName = String(name || '').trim();
   if (!cleanName) return res.status(400).json({ message: 'Tên lớp không được để trống' });
 
-  db.query('SELECT id FROM classes WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))', [cleanName], (err, rows) => {
+  db.query('SELECT id FROM classes WHERE name = ?', [cleanName], (err, rows) => {
     if (err) return res.status(500).json({ message: 'Lỗi kiểm tra trùng', error: err.message });
     if (rows.length) return res.status(409).json({ message: 'Tên lớp đã tồn tại' });
     db.query(
@@ -78,7 +78,7 @@ router.put('/:id', verifyToken, verifyAdmin, (req, res) => {
   if (!cleanName) return res.status(400).json({ message: 'Tên lớp không được để trống' });
 
   db.query(
-    'SELECT id FROM classes WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND id != ?',
+    'SELECT id FROM classes WHERE name = ? AND id != ?',
     [cleanName, req.params.id],
     (err, rows) => {
       if (err) return res.status(500).json({ message: 'Lỗi kiểm tra trùng', error: err.message });
@@ -98,7 +98,7 @@ router.put('/:id', verifyToken, verifyAdmin, (req, res) => {
 
 router.delete('/:id', verifyToken, verifyAdmin, (req, res) => {
   db.query(
-    'SELECT c.name, (SELECT COUNT(*) FROM students s WHERE LOWER(TRIM(s.class_name)) COLLATE utf8mb4_unicode_ci = LOWER(TRIM(c.name)) COLLATE utf8mb4_unicode_ci) count FROM classes c WHERE c.id=?',
+    'SELECT c.name, (SELECT COUNT(*) FROM students s WHERE s.class_name = c.name) count FROM classes c WHERE c.id=?',
     [req.params.id],
     (err, rows) => {
       if (err) return res.status(500).json({ message: 'Lỗi kiểm tra ràng buộc', error: err.message });
@@ -115,3 +115,4 @@ router.delete('/:id', verifyToken, verifyAdmin, (req, res) => {
 });
 
 module.exports = router;
+

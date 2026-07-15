@@ -74,3 +74,4 @@ router.put('/change-password', verifyToken, (req, res) => {
 });
 
 module.exports = router;
+

@@ -61,7 +61,7 @@ router.get('/', verifyToken, (req, res) => {
     params.push(semesterId);
   }
   if (className) {
-    query += ' AND LOWER(TRIM(st.class_name)) = LOWER(TRIM(?))';
+    query += ' AND st.class_name = ?';
     params.push(className);
   }
   if (courseId) {
@@ -140,3 +140,4 @@ router.delete('/:id', verifyToken, (req, res) => {
 });
 
 module.exports = router;
+

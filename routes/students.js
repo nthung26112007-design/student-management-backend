@@ -32,8 +32,8 @@ router.get('/', verifyToken, (req, res) => {
   let query = 'SELECT * FROM students WHERE 1=1';
   const params = [];
   if (className) {
-    query += ' AND LOWER(TRIM(class_name)) = LOWER(TRIM(?)) COLLATE utf8mb4_unicode_ci';
-    params.push(className);
+    query += ' AND class_name = ?';
+    params.push(className.trim());
   }
   query += ' ORDER BY full_name, id';
   db.query(query, params, (err, rows) => {
@@ -57,7 +57,7 @@ router.post('/', verifyToken, verifyAdmin, (req, res) => {
         connection.release();
         return res.status(500).json({ message: 'Không bắt đầu được giao dịch', error: beginErr.message });
       }
-      connection.query('SELECT id FROM students WHERE LOWER(TRIM(student_code)) = LOWER(TRIM(?)) COLLATE utf8mb4_unicode_ci', [code], async (findErr, existing) => {
+      connection.query('SELECT id FROM students WHERE student_code = ?', [code], async (findErr, existing) => {
         if (findErr || existing.length) {
           connection.rollback(() => {
             connection.release();
@@ -210,3 +210,4 @@ router.delete('/:id', verifyToken, verifyAdmin, (req, res) => {
 });
 
 module.exports = router;
+

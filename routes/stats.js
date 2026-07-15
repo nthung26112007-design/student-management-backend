@@ -81,3 +81,4 @@ router.get('/academic-report', verifyToken, async (req, res) => {
 });
 
 module.exports = router;
+
