@@ -22,7 +22,7 @@ router.get('/', verifyToken, (req, res) => {
   let query = `
       SELECT c.*,
              (SELECT COUNT(*) FROM students s
-              WHERE s.class_name = c.name) student_count
+              WHERE BINARY s.class_name = BINARY c.name) student_count
       FROM classes c WHERE 1=1
   `;
   const params = [];
@@ -98,7 +98,7 @@ router.put('/:id', verifyToken, verifyAdmin, (req, res) => {
 
 router.delete('/:id', verifyToken, verifyAdmin, (req, res) => {
   db.query(
-    'SELECT c.name, (SELECT COUNT(*) FROM students s WHERE s.class_name = c.name) count FROM classes c WHERE c.id=?',
+    'SELECT c.name, (SELECT COUNT(*) FROM students s WHERE BINARY s.class_name = BINARY c.name) count FROM classes c WHERE c.id=?',
     [req.params.id],
     (err, rows) => {
       if (err) return res.status(500).json({ message: 'Lỗi kiểm tra ràng buộc', error: err.message });
