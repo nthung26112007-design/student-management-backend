@@ -3,13 +3,33 @@ const router = express.Router();
 const db = require("../db");
 const bcrypt = require("bcrypt");
 
+// Departments/faculties are currently stored on classes and teachers rather
+// than in a separate lookup table. Return one clean list for form dropdowns.
+router.get("/departments", (req, res) => {
+    const query = `
+        SELECT department name
+        FROM teachers
+        WHERE department IS NOT NULL AND TRIM(department) <> ''
+        UNION
+        SELECT faculty name
+        FROM classes
+        WHERE faculty IS NOT NULL AND TRIM(faculty) <> ''
+        ORDER BY name
+    `;
+
+    db.query(query, (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows.map((row) => row.name));
+    });
+});
+
 // GET all teachers
 router.get("/", (req, res) => {
-    let query = "SELECT * FROM teachers";
+    let query = "SELECT t.* FROM teachers t";
     let params = [];
 
     if (req.query.teacherCode) {
-        query += " WHERE teacher_code = ?";
+        query += " WHERE t.teacher_code = ?";
         params.push(req.query.teacherCode);
     }
 
