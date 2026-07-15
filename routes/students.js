@@ -58,30 +58,42 @@ router.post('/', verifyToken, verifyAdmin, (req, res) => {
         return res.status(500).json({ message: 'Không bắt đầu được giao dịch', error: beginErr.message });
       }
       connection.query('SELECT id FROM students WHERE LOWER(TRIM(student_code))=LOWER(TRIM(?) COLLATE utf8mb4_unicode_ci)', [code], async (findErr, existing) => {
-        if (findErr || existing.length) return connection.rollback(() => {
-          connection.release();
-          res.status(findErr ? 500 : 409).json({ message: findErr ? 'Không kiểm tra được mã sinh viên' : 'Mã sinh viên đã tồn tại', error: findErr?.message });
-        });
-        connection.query('INSERT INTO students SET ?', row, async (insertErr, result) => {
-          if (insertErr) return connection.rollback(() => {
+        if (findErr || existing.length) {
+          connection.rollback(() => {
             connection.release();
-            res.status(500).json({ message: 'Không thêm được sinh viên', error: insertErr.message });
+            res.status(findErr ? 500 : 409).json({ message: findErr ? 'Không kiểm tra được mã sinh viên' : 'Mã sinh viên đã tồn tại', error: findErr?.message });
           });
+          return;
+        }
+        connection.query('INSERT INTO students SET ?', row, async (insertErr, result) => {
+          if (insertErr) {
+            connection.rollback(() => {
+              connection.release();
+              res.status(500).json({ message: 'Không thêm được sinh viên', error: insertErr.message });
+            });
+            return;
+          }
           try {
             const hash = await bcrypt.hash(code, 10);
             connection.query(
               'INSERT INTO users (username, password, role, student_id) VALUES (?, ?, \'student\', ?)',
               [code, hash, result.insertId],
               (userErr) => {
-                if (userErr) return connection.rollback(() => {
-                  connection.release();
-                  res.status(500).json({ message: 'Không tạo được tài khoản sinh viên', error: userErr.message });
-                });
-                connection.commit((commitErr) => {
-                  if (commitErr) return connection.rollback(() => {
+                if (userErr) {
+                  connection.rollback(() => {
                     connection.release();
-                    res.status(500).json({ message: 'Không hoàn tất thêm sinh viên', error: commitErr.message });
+                    res.status(500).json({ message: 'Không tạo được tài khoản sinh viên', error: userErr.message });
                   });
+                  return;
+                }
+                connection.commit((commitErr) => {
+                  if (commitErr) {
+                    connection.rollback(() => {
+                      connection.release();
+                      res.status(500).json({ message: 'Không hoàn tất thêm sinh viên', error: commitErr.message });
+                    });
+                    return;
+                  }
                   connection.release();
                   res.status(201).json({ message: 'Thêm sinh viên và tài khoản thành công', id: result.insertId, username: code });
                 });
