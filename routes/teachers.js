@@ -6,21 +6,25 @@ const bcrypt = require("bcrypt");
 // Departments/faculties are currently stored on classes and teachers rather
 // than in a separate lookup table. Return one clean list for form dropdowns.
 router.get("/departments", (req, res) => {
-    const query = `
-        SELECT department name
-        FROM teachers
-        WHERE department IS NOT NULL AND TRIM(department) <> ''
-        UNION
-        SELECT faculty name
-        FROM classes
-        WHERE faculty IS NOT NULL AND TRIM(faculty) <> ''
-        ORDER BY name
-    `;
+    db.query(
+        "SELECT department name FROM teachers WHERE department IS NOT NULL AND TRIM(department) <> ''",
+        (teacherErr, teacherRows) => {
+            if (teacherErr) return res.status(500).json({ error: teacherErr.message });
 
-    db.query(query, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows.map((row) => row.name));
-    });
+            db.query(
+                "SELECT faculty name FROM classes WHERE faculty IS NOT NULL AND TRIM(faculty) <> ''",
+                (classErr, classRows) => {
+                    if (classErr) return res.status(500).json({ error: classErr.message });
+
+                    const names = [...teacherRows, ...classRows]
+                        .map((row) => String(row.name || '').trim())
+                        .filter(Boolean);
+                    const uniqueNames = [...new Set(names)].sort((a, b) => a.localeCompare(b, 'vi'));
+                    res.json(uniqueNames);
+                }
+            );
+        }
+    );
 });
 
 // GET all teachers
