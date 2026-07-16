@@ -3,8 +3,12 @@ const router = express.Router();
 const db = require('../db');
 const { verifyToken } = require('../controllers/middleware/auth');
 
-const isStaff = (user) => user.role === 'admin' || user.role === 'teacher';
-const resolveStudentId = (req, requested) => req.user.role === 'student' ? req.user.student_id : (requested || null);
+const normalizedRole = (user) => String(user?.role || '').trim().toLowerCase();
+const isStaff = (user) => ['admin', 'teacher'].includes(normalizedRole(user));
+const isStudent = (user) => normalizedRole(user) === 'student' || Number(user?.student_id) > 0;
+const resolveStudentId = (req, requested) => isStudent(req.user)
+  ? req.user.student_id
+  : (requested || null);
 
 router.get('/invoices', verifyToken, (req, res) => {
   const studentId = resolveStudentId(req, req.query.studentId);
@@ -65,7 +69,7 @@ router.post('/invoices', verifyToken, (req, res) => {
 });
 
 router.post('/invoices/bulk', verifyToken, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ message: 'Chỉ quản trị viên được tạo hóa đơn theo lớp' });
+  if (normalizedRole(req.user) !== 'admin') return res.status(403).json({ message: 'Chỉ quản trị viên được tạo hóa đơn theo lớp' });
   const className = String(req.body.class_name || '').trim();
   const semesterId = Number(req.body.semester_id);
   const unitPrice = 350000;
@@ -237,8 +241,36 @@ router.get('/payments', verifyToken, (req, res) => {
 });
 
 router.post('/payments', verifyToken, (req, res) => {
-  if (!isStaff(req.user)) return res.status(403).json({ message: 'Không có quyền ghi nhận thanh toán' });
-  const { invoice_id, amount, payment_date, note } = req.body;
+  const studentUser = isStudent(req.user);
+  if (!isStaff(req.user) && !studentUser) {
+    return res.status(403).json({ message: 'Không có quyền ghi nhận thanh toán' });
+  }
+  const {
+    invoice_id,
+    amount,
+    payment_date,
+    note,
+    payment_method,
+    bank_account,
+    bank_password,
+    bank_otp,
+  } = req.body;
+
+  if (payment_method === 'demo_bank') {
+    if (!studentUser) {
+      return res.status(403).json({ message: 'Tài khoản ngân hàng thử chỉ dành cho sinh viên' });
+    }
+    const demoAccount = process.env.DEMO_BANK_ACCOUNT || '970400000001';
+    const demoPassword = process.env.DEMO_BANK_PASSWORD || '123456';
+    const demoOtp = process.env.DEMO_BANK_OTP || '123456';
+    if (
+      String(bank_account || '').trim() !== demoAccount ||
+      String(bank_password || '') !== demoPassword ||
+      String(bank_otp || '') !== demoOtp
+    ) {
+      return res.status(401).json({ message: 'Thông tin tài khoản hoặc mã OTP ngân hàng thử không đúng' });
+    }
+  }
   const numericAmount = Number(amount);
   if (!invoice_id || !Number.isFinite(numericAmount) || numericAmount <= 0) {
     return res.status(400).json({ message: 'Hóa đơn và số tiền hợp lệ là bắt buộc' });
@@ -251,11 +283,18 @@ router.post('/payments', verifyToken, (req, res) => {
         connection.release();
         return res.status(500).json({ message: 'Không bắt đầu được giao dịch', error: beginErr.message });
       }
-      connection.query(
-        `SELECT i.student_id, i.amount, COALESCE(SUM(p.amount),0) paid
+      const invoiceParams = [invoice_id];
+      let invoiceSql = `SELECT i.student_id, i.amount, COALESCE(SUM(p.amount),0) paid
          FROM tuition_invoices i LEFT JOIN tuition_payments p ON p.invoice_id=i.id
-         WHERE i.id=? GROUP BY i.id FOR UPDATE`,
-        [invoice_id],
+         WHERE i.id=?`;
+      if (studentUser) {
+        invoiceSql += ' AND i.student_id=?';
+        invoiceParams.push(req.user.student_id);
+      }
+      invoiceSql += ' GROUP BY i.id FOR UPDATE';
+      connection.query(
+        invoiceSql,
+        invoiceParams,
         (findErr, rows) => {
           if (findErr || !rows.length) return connection.rollback(() => {
             connection.release();
